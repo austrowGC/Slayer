@@ -56,12 +56,8 @@ class LinkList {
       console.log('cursor was null:\n' + data);
     }
   }
-  map=(func)=>{
-    let cursor = this.head;
-    while (cursor) {
-      cursor.data[func]();
-      cursor = cursor.next;
-    }
+  map=(f=_=>_, r=new LinkList(), l=this.head)=>{
+    return (l) ? (r.append(f(l.data)), this.map(f, r, l.next)) : r;
   }
 }
 class V2d {
@@ -86,17 +82,13 @@ class InputBuffer {
     this.log = new LinkList();
   }
 
+  clear=()=> this.log.clear()
   push=data=>this.log.append(data)
   pop=()=>this.log.dropHead()
-  values=(val, head=this.log.head, r=new LinkList())=>{
-    return (head) ? (r.append(head.data[val]), this.values(val, head.next, r)) : r;
-  }
-  valueString=(val, head=this.log.head)=>{
-    return (head) ? head.data[val] + '\n' + this.valueString(val, head.next) : '\n';
-  }
+  values=v=>this.log.map(x => x[v])
   releaseExpired=(msNow, log=this.log, r=new LinkList())=>{
     if (log.head) {
-      if (msNow - log.head.data.time > this.delay) {
+      if (msNow - log.head.data.timeStamp > this.delay) {
         r.append(log.dropHead());
         this.releaseExpired(msNow, log, r);
       }
@@ -107,9 +99,7 @@ class InputBuffer {
 class Game {
   constructor(window, document = window.document) {
     this.gutter = 4;
-    this.buffer = new InputBuffer(); /* keep a master list? */
-    this.window = window;
-    this.document = document;
+    this.buffer = new InputBuffer(500); /* keep a master list? */
     this.cxt = (canvas=>(
       canvas.setAttribute('tabindex', 1),
       canvas.width = window.innerWidth-this.gutter,
@@ -117,19 +107,31 @@ class Game {
       canvas.addEventListener('keydown', this.keyInput, false),
       canvas.addEventListener('mousedown', this.mouseInput, false),
       canvas.addEventListener('contextmenu', e=>(e.preventDefault(), e), false),
+      document.querySelector`body`.appendChild(canvas),
       canvas.getContext`2d`
-    ))(document.createElement`canvas`)
-    document.querySelector`body`.appendChild(this.cxt.canvas);
-    this.cxt.canvas.focus();
-    this.update();
+      ))(document.createElement`canvas`)
+    this.menu = new Menu(this);
+    this.menu.start(this.cxt, window)();
+    // this.start(window);
   }
 
+  eventStart=(window, document=window.document)=>(e=>{
+    e.preventDefault();
+    document.querySelector`body`.appendChild(this.cxt.canvas);
+    this.cxt.canvas.focus();
+    this.update(window);
+  })
+  start=(window)=>{
+    this.buffer.clear();
+    this.cxt.canvas.focus();
+    return this.update(window)();
+  }
   keyInput=e=>{
     e.preventDefault();
     if (e.repeat) false;
     else this.buffer.push({
       button: e.keyCode,
-      time: e.timeStamp
+      timeStamp: e.timeStamp
     });
     return e;
   }
@@ -138,25 +140,25 @@ class Game {
     if (e.repeat) false;
     else this.buffer.push({
       button: e.buttons,
-      time: e.timeStamp
+      timeStamp: e.timeStamp,
+      x: e.x,
+      y: e.y
     });
     return e;
   }
-  update=(t=0)=>{
+  update=(window)=>((t=0)=>{
     this.clearCanvas();
     this.drawFrameTime(t);
     this.drawBufferValuesV('button', 12, 0, 12);
-    this.drawBufferValuesV('time', 12, 12*4, 12);
-    (expired=>{
-      while (expired.head) /* examine for chords? */ console.log(expired.dropHead());
-    })(this.buffer.releaseExpired(t))
-    
-    this.window.requestAnimationFrame(this.update);
-  }
+    this.drawBufferValuesV('timeStamp', 12, 12*4, 12);
+    this.retireInput(t, console.log);
+    window.requestAnimationFrame(this.update(window));
+  })
   clearCanvas=()=>this.cxt.clearRect(0, 0, this.cxt.canvas.width, this.cxt.canvas.height)
   drawFrameTime=(t, fontSize = 12, x=0, y=0)=>{
     this.cxt.fillStyle = '#EEEEEE';
     this.cxt.font = fontSize + 'px serif';
+    this.cxt.fontBaseline = 'alphabetic';
     this.cxt.fillText(t, x, y+fontSize);
   }
   drawBufferValuesH=(val, fontSize = 12, x=0, y=0)=>{
@@ -167,6 +169,7 @@ class Game {
   drawBufferValuesV(val, fontSize = 12, x=0, y=0) {
     this.cxt.fillStyle = '#00FFFF';
     this.cxt.font = fontSize + 'px serif';
+    this.cxt.fontBaseline = 'alphabetic';
     (list=>{
       while (list.head) {
         y += fontSize;
@@ -174,51 +177,57 @@ class Game {
       }
     })(this.buffer.values(val))
   }
-  
+  retireInput=(t=0, f=_=>_)=> this.buffer.releaseExpired(t).map(f)
 }
 class Menu {
-  constructor(cxt, window) {
+  constructor(Game) {
+    this.game = Game;
+    this.position = new V2d();
+    this.areas = new LinkList();
   }
   
-  update=(t=0)=>{
-    this.window.requestAnimationFrame(this.update);
-  }
-  init=cxt=>{
+  update=window=>((t=0)=>{
+    this.game.retireInput(t, this.findAreaClicks);
+    window.requestAnimationFrame(this.update(window));
+  })
+  start=(cxt, window)=>{
+    // window.document.querySelector`body`.appendChild(cxt.canvas);
+    this.game.buffer.clear();
     ((x,y)=>{
       this.drawTitle(cxt, x, y);
-      (startY=>{
-        this.drawStartButton(cxt, x, startY);
-        cxt.canvas.addEventListener('click', this.eventStartClick(this, x, startY), false);
-      })(y+22)
-    })(0,0)
+      this.drawStartButton(cxt, x, y+36, 30, 18);
+    })(36, 36)
+    return this.update(window);
   }
   drawTitle=(cxt, x=0, y=0)=>{
     cxt.fillStyle = 'red';
-    cxt.font = '16px serif';
-    cxt.fillText('SLAYER', x, y);
-  }
-  drawStartButton=(cxt, x=0, y=0)=>{
-    cxt.fillStyle = 'red';
-    cxt.font = '12px serif';
-    cxt.fillText('start', x, y);
+    cxt.font = '24px serif';
+    cxt.textBaseline = 'top';
     cxt.beginPath();
-    cxt.strokeRect(x, y, x+36, y+12);
-    cxt.endPath();
+    cxt.fillText('S L A Y E R', x, y);
   }
-  eventStartClick=(Menu, x=0, y=0)=>{
-    return e=>{
-      if (e.button==1)
-      if ((x < e.x && e.x < x+36) && (y < e.y && e.y < y+12)) false;
-    }
+  drawStartButton=(cxt, x=0, y=0, w=0, h=0)=>{
+    cxt.strokeStyle = 'red';
+    cxt.fillStyle = 'red';
+    cxt.font = '16px serif';
+    cxt.textBaseline = 'top';
+    cxt.beginPath();
+    cxt.strokeRect(x, y, w, h);
+    cxt.closePath();
+    cxt.fillText('start', x+2, y, w);
+    this.areas.append(this.area(this.leftClick(this.game.start, window), x, y, w, h));
   }
-}
-class Arena {
-  constructor(context, window) {
-    
-  }
-
-  update=(t=0)=>{
-    this.window.requestAnimationFrame(this.update);
+  leftClick=(f=_=>_, arg)=>(e=>{
+    return (e.button==1) ? f(arg) : console.log(f, e);
+  })
+  areaClick=e=>(area=>{
+    if ((area.x < e.x && e.x < area.x+area.w) && (area.y < e.y && e.y < area.y+area.h)) area.callback(e);
+  })
+  area=(callback=_=>_, x=0, y=0, w=0, h=0)=>({
+    callback: callback, x: x, y: y, w: w, h: h
+  })
+  findAreaClicks=e=>{
+    this.areas.map(this.areaClick(e))
   }
 }
 // (window=>(new Game(window)))(this)
