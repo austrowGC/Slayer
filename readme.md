@@ -21,3 +21,6 @@ To bring slaughter upon the endless forces of Chaos.
 * intermission menu
   * additional input unlocks
   * input customization
+
+### questions
+* why does body have to exist

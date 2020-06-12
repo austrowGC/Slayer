@@ -28,20 +28,30 @@ class LinkList {
       cursor.next = new LinkNode(data, null, cursor);
     }
   }
-  locate=(data)=>{
-    let cursor = this.head;
-    while (cursor) {
-      if (cursor.data === data) break;
-      else cursor = cursor.next;
+  // filter=(f=_=>_, node=this.head)=>{
+  //   if (node) return (f(node)) ? 
+  // }
+  scan=(data, node=this.head)=>{
+    // let cursor = this.head;
+    // while (cursor) {
+    //   if (cursor.data === data) break;
+    //   else cursor = cursor.next;
 
-    }
-    return cursor;
+    // }
+    // return cursor;
+    if (node) return (data == node.data) ? node : this.scan(data, node.next);
+    else false;
   }
   search=(data)=>{
-    let node = this.locate(data);
-    let value = node ? node.data : null;
-    return value;
+    // let node = this.match(data);
+    // let value = node ? node.data : null;
+    // return value;
+    (match=>{
+      if (match) return match.data;
+      else false;
+    })(this.scan(data))
   }
+  //! refactor remove
   remove=(data)=>{
     let cursor = this.head, prev = null;
     if (cursor) {
@@ -59,6 +69,9 @@ class LinkList {
   map=(f=_=>_, r=new LinkList(), l=this.head)=>{
     return (l) ? (r.append(f(l.data)), this.map(f, r, l.next)) : r;
   }
+  mask=(f=_=>_, r=new LinkList(), l=this.head)=>{
+    return (l) ? ((k=>k??r.append(k))(f(l.data)), this.mask(f, r, l.next)) : r;
+  }
 }
 class V2d {
   constructor(x=0, y=0) { this.x = x, this.y = y }
@@ -75,6 +88,38 @@ class V2d {
     v = isNaN(v) ? v : new V2d(v, v),
     Math.sqrt((this.x - v.x)**2 + (this.y - v.y)**2)
   );
+}
+class Entity {
+  constructor(owner = {}, shape = {}, vecP = new V2d(), vecV = new V2d()) {
+    this.owner = owner;
+    this.team = owner.team;
+    this.Position = vecP;  // top left
+    this.Velocity = vecV;
+  }
+}
+class Player {
+  constructor(controls=new LinkList(), entities=new LinkList()) {
+    /* 
+      define controls
+      define things player controls
+    */
+    this.controls = controls;
+    this.entities = entities;
+  }
+
+  parseInputs=list=>{
+    return list.mask(input=>{
+      false;
+    });
+  }
+  parseControls=button=>{
+    return this.controls.mask(()=>false);
+  }
+  executeAction=button=>{
+    (control=>{
+      if (control) return control.action();
+    })(this.controls.map(x=>x?x.button:null).search(button))
+  }
 }
 class InputBuffer {
   constructor(msDelay = 1000) {
@@ -95,41 +140,45 @@ class InputBuffer {
     }
     return r;
   }
+  retireInput=(t=0, f=_=>_)=> this.releaseExpired(t).map(f)
 }
 class Game {
-  constructor(window, document = window.document) {
-    this.gutter = 4;
-    this.buffer = new InputBuffer(500); /* keep a master list? */
+  constructor(window, document = window.document, body = document.body) {
+    this.inputs = new InputBuffer(500); /* keep a master list? */
     this.cxt = (canvas=>(
       canvas.setAttribute('tabindex', 1),
-      canvas.width = window.innerWidth-this.gutter,
-      canvas.height = window.innerHeight-this.gutter,
+      canvas.width = window.innerWidth,
+      canvas.height = window.innerHeight,
       canvas.addEventListener('keydown', this.keyInput, false),
       canvas.addEventListener('mousedown', this.mouseInput, false),
       canvas.addEventListener('contextmenu', e=>(e.preventDefault(), e), false),
-      document.querySelector`body`.appendChild(canvas),
+      body.appendChild(canvas),
       canvas.getContext`2d`
       ))(document.createElement`canvas`)
+    this.players = (list=>(
+      list.append(new Player((inputs=>(
+                              inputs.append({/* map goes here */}),
+                              inputs))(new LinkList())
+                            )),
+      list
+    ))(new LinkList());
+    // controls linked list?
     this.menu = new Menu(this);
-    this.menu.start(this.cxt, window)();
+    this.menu.drawSplash(this.cxt, window)();
     // this.start(window);
   }
 
-  eventStart=(window, document=window.document)=>(e=>{
-    e.preventDefault();
-    document.querySelector`body`.appendChild(this.cxt.canvas);
-    this.cxt.canvas.focus();
-    this.update(window);
-  })
   start=(window)=>{
-    this.buffer.clear();
+    this.inputs.clear();
     this.cxt.canvas.focus();
     return this.update(window)();
   }
   keyInput=e=>{
     e.preventDefault();
     if (e.repeat) false;
-    else this.buffer.push({
+    else this.inputs.push({
+      event: e,
+      type: 'key',
       button: e.keyCode,
       timeStamp: e.timeStamp
     });
@@ -138,7 +187,9 @@ class Game {
   mouseInput=e=>{
     e.preventDefault();
     if (e.repeat) false;
-    else this.buffer.push({
+    else this.inputs.push({
+      event: e,
+      type: 'mouse',
       button: e.buttons,
       timeStamp: e.timeStamp,
       x: e.x,
@@ -149,80 +200,105 @@ class Game {
   update=(window)=>((t=0)=>{
     this.clearCanvas();
     this.drawFrameTime(t);
-    this.drawBufferValuesV('button', 12, 0, 12);
-    this.drawBufferValuesV('timeStamp', 12, 12*4, 12);
-    this.retireInput(t, console.log);
+    this.drawBufferDataV(x=>x.button + '\t\t' + x.timeStamp, 12, 0, 12);
+    (input=>{
+      if (input) ((player, button)=>{
+        while (player) {
+          player.executeAction(button);
+          player = player.next;
+        }
+      })(this.players.head, input.data.button)
+    })(this.buffer.head)
+    this.inputs.log.map(x=>x);
+    this.inputs.retireInput(t, _=>false);
     window.requestAnimationFrame(this.update(window));
   })
   clearCanvas=()=>this.cxt.clearRect(0, 0, this.cxt.canvas.width, this.cxt.canvas.height)
   drawFrameTime=(t, fontSize = 12, x=0, y=0)=>{
     this.cxt.fillStyle = '#EEEEEE';
     this.cxt.font = fontSize + 'px serif';
-    this.cxt.fontBaseline = 'alphabetic';
     this.cxt.fillText(t, x, y+fontSize);
   }
   drawBufferValuesH=(val, fontSize = 12, x=0, y=0)=>{
     this.cxt.fillStyle = '#00FFFF';
     this.cxt.font = fontSize + 'px serif';
-    this.cxt.fillText(this.buffer.values(val), x, y+fontSize);
+    this.cxt.fillText(this.inputs.values(val), x, y+fontSize);
   }
-  drawBufferValuesV(val, fontSize = 12, x=0, y=0) {
+  drawBufferValuesV=(val, fontSize = 12, x=0, y=0)=>{
     this.cxt.fillStyle = '#00FFFF';
     this.cxt.font = fontSize + 'px serif';
-    this.cxt.fontBaseline = 'alphabetic';
     (list=>{
       while (list.head) {
         y += fontSize;
         this.cxt.fillText(list.dropHead(), x, y);
       }
-    })(this.buffer.values(val))
+    })(this.inputs.values(val))
   }
-  retireInput=(t=0, f=_=>_)=> this.buffer.releaseExpired(t).map(f)
+  drawBufferDataV=(pattern=_=>_, fontSize=12, x=0, y=0)=>{
+    this.cxt.fillStyle = '#00FFFF';
+    this.cxt.font = fontSize+'px serif';
+    (list=>{
+      while (list.head) {
+        y+=fontSize;
+        this.cxt.fillText(list.dropHead(), x, y);
+      }
+    })(this.inputs.log.map(pattern))
+  }
 }
 class Menu {
   constructor(Game) {
-    this.game = Game;
-    this.position = new V2d();
+    this.Game = Game;
     this.areas = new LinkList();
   }
   
   update=window=>((t=0)=>{
-    this.game.retireInput(t, this.findAreaClicks);
+    this.Game.buffer.retireInput(t, this.findAreaClicks);
     window.requestAnimationFrame(this.update(window));
   })
-  start=(cxt, window)=>{
-    // window.document.querySelector`body`.appendChild(cxt.canvas);
-    this.game.buffer.clear();
+  drawSplash=(cxt, window)=>{
+    this.Game.buffer.clear();
     ((x,y)=>{
       this.drawTitle(cxt, x, y);
-      this.drawStartButton(cxt, x, y+36, 30, 18);
-    })(36, 36)
+      this.drawStartButton('Start', cxt, x, y+36);
+    })(12, 12)
     return this.update(window);
   }
   drawTitle=(cxt, x=0, y=0)=>{
-    cxt.fillStyle = 'red';
+    cxt.strokeStyle = 'red';
     cxt.font = '24px serif';
     cxt.textBaseline = 'top';
     cxt.beginPath();
-    cxt.fillText('S L A Y E R', x, y);
+    cxt.strokeText('S L A Y E R', x, y);
   }
-  drawStartButton=(cxt, x=0, y=0, w=0, h=0)=>{
+  drawStartButton=(text, cxt, x=0, y=0, fontpx=16, w=cxt.measureText(text).width, h=fontpx+2)=>{
     cxt.strokeStyle = 'red';
     cxt.fillStyle = 'red';
-    cxt.font = '16px serif';
+    cxt.font = fontpx + 'px serif';
     cxt.textBaseline = 'top';
     cxt.beginPath();
     cxt.strokeRect(x, y, w, h);
     cxt.closePath();
-    cxt.fillText('start', x+2, y, w);
-    this.areas.append(this.area(this.leftClick(this.game.start, window), x, y, w, h));
+    cxt.fillText(text, x+(w/text.length), y+2);
+    this.areas.append(this.area(this.leftClick(this.Game.start, window), x, y, w, h));
+  }
+  playerCardArea=()=>{
+    /** 
+     * rectangle area
+     * has pre-game player options
+     * 
+    */
   }
   leftClick=(f=_=>_, arg)=>(e=>{
     return (e.button==1) ? f(arg) : console.log(f, e);
   })
-  areaClick=e=>(area=>{
-    if ((area.x < e.x && e.x < area.x+area.w) && (area.y < e.y && e.y < area.y+area.h)) area.callback(e);
-  })
+  areaClick=e=>area=>{
+    if (area.x < e.x
+      && e.x < area.x+area.w
+      && area.y < e.y
+      && e.y < area.y+area.h
+    ) area.callback(e);
+    else e;
+  }
   area=(callback=_=>_, x=0, y=0, w=0, h=0)=>({
     callback: callback, x: x, y: y, w: w, h: h
   })
